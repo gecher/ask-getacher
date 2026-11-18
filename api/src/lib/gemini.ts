@@ -67,6 +67,10 @@ function normalize(vector: number[]): number[] {
 const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL ?? "gemini-4-hydrogen";
 const MAX_OUTPUT_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS ?? 4096);
 
+// How much the model "thinks" before answering, for example "low". Leave it unset
+// to use the model's default. Check the exact value in AI Studio > Get code.
+const THINKING_LEVEL = process.env.GEMINI_THINKING_LEVEL;
+
 type GenerateResponse = {
   candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
 };
@@ -83,7 +87,11 @@ export async function* streamChat(systemPrompt: string, userPrompt: string): Asy
     {
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: MAX_OUTPUT_TOKENS },
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        ...(THINKING_LEVEL ? { thinkingConfig: { thinkingLevel: THINKING_LEVEL } } : {}),
+      },
     },
   );
 

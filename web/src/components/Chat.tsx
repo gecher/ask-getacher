@@ -150,6 +150,12 @@ function Answer({ message, id, loading }: { message: Message; id: number; loadin
   // Which source is open, or null. Each answer remembers its own.
   const [open, setOpen] = useState<number | null>(null);
 
+  // Once the answer is written, show only the sources it actually cites.
+  const cited = citedNumbers(message.text);
+  const visible = message.sources
+    .map((source, i) => ({ source, n: i + 1 }))
+    .filter(({ n }) => loading || cited.size === 0 || cited.has(n));
+
   return (
     <article className={message.failed ? "answer failed" : "answer"}>
       {message.text ? (
@@ -159,40 +165,59 @@ function Answer({ message, id, loading }: { message: Message; id: number; loadin
       )}
 
       {message.sources.length > 0 && !message.failed && (
-        <ol className="sources">
-          {message.sources.map((s, n) => (
-            <li key={n} id={`source-${id}-${n + 1}`}>
+        <ul className="sources">
+          {visible.map(({ source, n }) => (
+            <li key={n} id={`source-${id}-${n}`}>
               <button
                 type="button"
-                className={open === n + 1 ? "source open" : "source"}
-                onClick={() => setOpen(open === n + 1 ? null : n + 1)}
-                aria-expanded={open === n + 1}
+                className={open === n ? "source open" : "source"}
+                onClick={() => setOpen(open === n ? null : n)}
+                aria-expanded={open === n}
               >
-                <span className="cite">{n + 1}</span>
-                {s.section}
+                <span className="cite">{n}</span>
+                {source.section}
               </button>
-              {open === n + 1 && <p className="source-text">{stripHeader(s.content)}</p>}
+              {open === n && <p className="source-text">{stripHeader(source.content)}</p>}
             </li>
           ))}
-        </ol>
+        </ul>
       )}
     </article>
   );
 }
 
-/** Turns "[1]" in the answer into a small button that opens source 1. */
+const CITATION = /(\[\d+(?:\s*,\s*\d+)*\])/g;
+
+/** Turns citations like [1], [1, 3] or [1][3] into small buttons that open that source. */
 function withCitations(text: string, count: number, open: (n: number) => void): ReactNode[] {
-  return text.split(/(\[\d+\])/g).map((part, i) => {
-    const n = Number(part.match(/^\[(\d+)\]$/)?.[1] ?? 0);
-    if (n >= 1 && n <= count) {
-      return (
-        <button key={i} type="button" className="cite" onClick={() => open(n)} title={`Show source ${n}`}>
-          {n}
-        </button>
-      );
+  return text.split(CITATION).map((part, i) => {
+    if (!/^\[\d+(?:\s*,\s*\d+)*\]$/.test(part)) {
+      return <span key={i}>{part}</span>;
     }
-    return <span key={i}>{part}</span>;
+
+    const numbers = part
+      .slice(1, -1)
+      .split(",")
+      .map((n) => Number(n.trim()))
+      .filter((n) => n >= 1 && n <= count);
+
+    return numbers.map((n) => (
+      <button key={`${i}-${n}`} type="button" className="cite" onClick={() => open(n)} title={`Show source ${n}`}>
+        {n}
+      </button>
+    ));
   });
+}
+
+/** The source numbers an answer cites, such as {1, 3}. */
+function citedNumbers(text: string): Set<number> {
+  const found = new Set<number>();
+  for (const match of text.matchAll(CITATION)) {
+    for (const n of match[1].slice(1, -1).split(",")) {
+      found.add(Number(n.trim()));
+    }
+  }
+  return found;
 }
 
 /** Removes the "Title > Section" line that was added for search. */
