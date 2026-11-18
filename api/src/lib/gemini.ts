@@ -63,3 +63,57 @@ function normalize(vector: number[]): number[] {
   const length = Math.sqrt(vector.reduce((sum, x) => sum + x * x, 0));
   return length === 0 ? vector : vector.map((x) => x / length);
 }
+
+const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL ?? "gemini-4-hydrogen";
+const MAX_OUTPUT_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS ?? 4096);
+
+type GenerateResponse = {
+  candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
+};
+
+/**
+ * Asks the chat model for an answer and yields it piece by piece as it is written.
+ * "async function*" is an async generator: the JavaScript version of
+ * IAsyncEnumerable with yield return in C#.
+ */
+export async function* streamChat(systemPrompt: string, userPrompt: string): AsyncGenerator<string> {
+  // alt=sse: Gemini streams the answer as lines starting with "data: "
+  const response = await postWithRetry(
+    `${API_URL}/models/${CHAT_MODEL}:streamGenerateContent?alt=sse`,
+    {
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: MAX_OUTPUT_TOKENS },
+    },
+  );
+
+  if (!response.body) {
+    throw new Error("Gemini returned an empty response.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    // Network pieces don't line up with lines, so keep the unfinished last line.
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+
+      const data = JSON.parse(line.slice("data:".length)) as GenerateResponse;
+      const text = (data.candidates?.[0]?.content?.parts ?? [])
+        .filter((part) => !part.thought)      // skip the model's internal "thinking"
+        .map((part) => part.text ?? "")
+        .join("");
+
+      if (text) yield text;
+    }
+  }
+}

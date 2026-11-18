@@ -16,6 +16,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts"
+    "dev": "tsx watch src/server.ts",
+    "ingest": "tsx scripts/ingest.ts"
   }
 }
